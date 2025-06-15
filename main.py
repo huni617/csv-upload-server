@@ -1,73 +1,67 @@
 from fastapi import FastAPI, UploadFile, File
-import shutil, os
 import pandas as pd
+import os
 from datetime import datetime, timedelta
-import traceback
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+# CORS 설정 (필요한 도메인으로 제한 가능)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.post("/upload-csv")
 async def upload_csv(file: UploadFile = File(...)):
+    # Dropbox 내 경로
+    amazon_reports_path = "/AmazonReports"
+    merged_csv_path = "/MergedData/total.csv"
+
+    # 파일 저장
+    uploaded_path = os.path.join(amazon_reports_path, file.filename)
+    with open(uploaded_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    # 업로드된 파일 읽기
     try:
-        print(f"✅ 파일 업로드 요청 받음: {file.filename}")
-
-        os.makedirs("uploads", exist_ok=True)
-        filepath = os.path.join("uploads", file.filename)
-        with open(filepath, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        upload_date = datetime.today() - timedelta(days=2)
-        date_str = upload_date.strftime("%Y-%m-%d")
-
-        df = pd.read_csv(filepath)
-        print(f"✅ CSV 로드 완료. row 수: {len(df)}")
-
-        df.insert(0, "Date", date_str)
-        df.insert(1, "Month Week", "")
-
-        # 수치형으로 변환
-        num_cols = [
-            "Sessions - Total",
-            "Sessions - Total - B2B",
-            "Page Views - Total",
-            "Page Views - Total - B2B",
-            "Units Ordered",
-            "Units Ordered - B2B",
-            "Ordered Product Sales",
-            "Ordered Product Sales - B2B"
-        ]
-
-        for col in num_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            print(f"➡️ 컬럼 '{col}' 변환 완료")
-
-        if "Title" in df.columns:
-            title_index = df.columns.get_loc("Title")
-        else:
-            return {"status": "error", "detail": "Title column not found."}
-
-        df.insert(title_index + 1, "Total Session", df["Sessions - Total"] + df["Sessions - Total - B2B"])
-        df.insert(title_index + 2, "Total Page View", df["Page Views - Total"] + df["Page Views - Total - B2B"])
-        df.insert(title_index + 3, "Total Units Ordered", df["Units Ordered"] + df["Units Ordered - B2B"])
-        df.insert(title_index + 4, "Total Ordered Product Sales", df["Ordered Product Sales"] + df["Ordered Product Sales - B2B"])
-        df["Total Conversion Rate"] = round((df["Total Units Ordered"] / df["Total Session"]) * 100, 2)
-
-        # 기존 파일과 병합
-        total_path = "uploads/total.csv"
-        if os.path.exists(total_path):
-            total_df = pd.read_csv(total_path)
-            print(f"📂 기존 total.csv row 수: {len(total_df)}")
-            merged_df = pd.concat([total_df, df], ignore_index=True)
-        else:
-            merged_df = df
-
-        print(f"🆕 병합 후 총 row 수: {len(merged_df)}")
-        merged_df.to_csv(total_path, index=False)
-        print("💾 저장 완료")
-
-        return {"status": "success", "filename": file.filename}
-
+        df_new = pd.read_csv(uploaded_path)
     except Exception as e:
-        print("❌ 예외 발생:")
-        traceback.print_exc()
-        return {"status": "error", "detail": str(e)}
+        return {"error": f"파일 읽기 실패: {e}"}
+
+    # 날짜 계산 (업로드 기준 -2일)
+    upload_date = datetime.now().date()
+    target_date = upload_date - timedelta(days=2)
+    df_new["Date"] = target_date.strftime("%Y-%m-%d")
+
+    # 컬럼이 존재하지 않으면 추가
+    if "Month Week" not in df_new.columns:
+        df_new["Month Week"] = ""
+
+    # 필수 집계 컬럼 추가 (초기값 0 또는 계산)
+    default_columns = [
+        "Total Session", "Total Page View",
+        "Total Units Ordered", "Total Ordered Product Sales", "Total Conversion Rate"
+    ]
+    for col in default_columns:
+        if col not in df_new.columns:
+            df_new[col] = 0
+
+    # 기존 total.csv 불러오기
+    if os.path.exists(merged_csv_path):
+        df_total = pd.read_csv(merged_csv_path)
+        df_merged = pd.concat([df_total, df_new], ignore_index=True)
+    else:
+        df_merged = df_new
+
+    # 병합 저장
+    df_merged.to_csv(merged_csv_path, index=False)
+
+    return {
+        "✅ 추가된 row 수": len(df_new),
+        "✅ 병합된 총 row 수": len(df_merged),
+        "✅ 저장 완료": merged_csv_path
+    }
