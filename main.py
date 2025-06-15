@@ -3,7 +3,7 @@ import shutil, os
 
 app = FastAPI()
 
-@app.post("/upload")
+@app.post("/upload-csv")
 async def upload_csv(file: UploadFile = File(...)):
     os.makedirs("uploads", exist_ok=True)
     filepath = os.path.join("uploads", file.filename)
