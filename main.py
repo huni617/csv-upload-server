@@ -19,8 +19,11 @@ app.add_middleware(
 )
 
 # 경로 정의 (Dropbox 앱 폴더 내 경로)
-UPLOAD_PATH = "/csv file merge/AmazonReports"
-MERGED_PATH = "/csv file merge/MergedData/total.csv"
+UPLOAD_PATH = "/mnt/data/AmazonReports"
+MERGED_PATH = "/mnt/data/MergedData/total.csv"
+
+os.makedirs(UPLOAD_PATH, exist_ok=True)
+os.makedirs(os.path.dirname(MERGED_PATH), exist_ok=True)
 
 # 보조 함수: Dropbox 경로에 폴더 존재 확인 후 없으면 생성
 def ensure_dropbox_folder(path):
